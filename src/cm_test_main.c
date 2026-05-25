@@ -216,6 +216,84 @@ static int log_path_is_explicit(const char *path)
     return path[0] == '/' || strchr(path, '/') != NULL;
 }
 
+static int path_is_absolute(const char *path)
+{
+    return path && path[0] == '/';
+}
+
+static int path_exists(const char *path)
+{
+    struct stat st;
+
+    return path && path[0] && !stat(path, &st);
+}
+
+static void dirname_of(const char *path, char *out, size_t out_size)
+{
+    char *slash;
+
+    copy_value(out, out_size, path && path[0] ? path : ".");
+    slash = strrchr(out, '/');
+    if (!slash) {
+        copy_value(out, out_size, ".");
+        return;
+    }
+    if (slash == out) {
+        slash[1] = '\0';
+        return;
+    }
+    *slash = '\0';
+}
+
+static void basename_of(const char *path, char *out, size_t out_size)
+{
+    const char *slash = strrchr(path, '/');
+
+    copy_value(out, out_size, slash ? slash + 1 : path);
+}
+
+static void get_config_root_dir(const char *config_file, char *out, size_t out_size)
+{
+    char config_dir[MAX_VALUE_LEN];
+    char config_dir_base[MAX_VALUE_LEN];
+
+    dirname_of(config_file, config_dir, sizeof(config_dir));
+    basename_of(config_dir, config_dir_base, sizeof(config_dir_base));
+    if (!strcmp(config_dir_base, "configs"))
+        dirname_of(config_dir, out, out_size);
+    else
+        copy_value(out, out_size, config_dir);
+}
+
+static int resolve_relative_path(const char *base_dir, char *path, size_t path_size, int must_exist)
+{
+    char resolved[MAX_VALUE_LEN];
+
+    if (!path[0] || path_is_absolute(path))
+        return 0;
+    if (must_exist && path_exists(path))
+        return 0;
+
+    snprintf(resolved, sizeof(resolved), "%s/%s", base_dir, path);
+    if (strlen(resolved) >= path_size)
+        return -1;
+    if (must_exist && !path_exists(resolved))
+        return 0;
+    copy_value(path, path_size, resolved);
+    return 0;
+}
+
+static int resolve_config_paths(CM_TEST_CONFIG *config)
+{
+    char base_dir[MAX_VALUE_LEN];
+
+    get_config_root_dir(config->config_file, base_dir, sizeof(base_dir));
+    return resolve_relative_path(base_dir, config->cm_path, sizeof(config->cm_path), 1)
+        || resolve_relative_path(base_dir, config->log_dir, sizeof(config->log_dir), 0)
+        || resolve_relative_path(base_dir, config->at_map_file, sizeof(config->at_map_file), 1)
+        || resolve_relative_path(base_dir, config->udhcpc_script, sizeof(config->udhcpc_script), 1);
+}
+
 static int resolve_log_path(const char *log_dir, char *path, size_t path_size)
 {
     char resolved[MAX_VALUE_LEN];
@@ -956,6 +1034,10 @@ int main(int argc, char **argv)
         copy_value(config.log_file, sizeof(config.log_file), cli_log_file);
     if (cli_verbose)
         config.verbose = 1;
+    if (resolve_config_paths(&config)) {
+        fprintf(stderr, "failed to resolve paths relative to config %s\n", config.config_file);
+        return 1;
+    }
     if (!config.log_file[0])
         make_default_log_file(config.config_file, config.log_file, sizeof(config.log_file));
     if (!config.cm_log_file[0] && config.log_file[0])
