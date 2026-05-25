@@ -5,6 +5,7 @@
 # package default.* scripts.
 
 RESOLV_CONF="/etc/resolv.conf"
+RESOLV_CONF_BACKUP="/tmp/resolv.conf.${interface}.udhcpc.backup"
 IPCMD=`which ip`
 
 is_systemd_resolved_active()
@@ -32,6 +33,7 @@ update_dns()
 	elif is_legacy_resolvconf; then
 		echo -n "$R" | /sbin/resolvconf -a "${interface}.udhcpc"
 	else
+		[ -e "$RESOLV_CONF" ] && [ ! -e "$RESOLV_CONF_BACKUP" ] && cp -p "$RESOLV_CONF" "$RESOLV_CONF_BACKUP"
 		echo -n "$R" > "$RESOLV_CONF"
 	fi
 }
@@ -42,6 +44,9 @@ clear_dns()
 		resolvectl revert "$interface"
 	elif is_legacy_resolvconf; then
 		/sbin/resolvconf -d "${interface}.udhcpc"
+	elif [ -e "$RESOLV_CONF_BACKUP" ]; then
+		cat "$RESOLV_CONF_BACKUP" > "$RESOLV_CONF"
+		rm -f "$RESOLV_CONF_BACKUP"
 	fi
 }
 
