@@ -6,6 +6,44 @@
 
 RESOLV_CONF="/etc/resolv.conf"
 
+is_systemd_resolved_active()
+{
+	command -v resolvectl >/dev/null 2>&1 && [ -d /run/systemd/resolve ]
+}
+
+is_legacy_resolvconf()
+{
+	[ -x /sbin/resolvconf ] && [ "$(basename "$(readlink -f /sbin/resolvconf 2>/dev/null)")" != "resolvectl" ]
+}
+
+update_dns()
+{
+	if is_systemd_resolved_active; then
+		if [ -n "$dns" ]; then
+			resolvectl dns "$interface" $dns
+			if [ -n "$domain" ]; then
+				resolvectl domain "$interface" "$domain" "~."
+			else
+				resolvectl domain "$interface" "~."
+			fi
+			resolvectl default-route "$interface" yes
+		fi
+	elif is_legacy_resolvconf; then
+		echo -n "$R" | /sbin/resolvconf -a "${interface}.udhcpc"
+	else
+		echo -n "$R" > "$RESOLV_CONF"
+	fi
+}
+
+clear_dns()
+{
+	if is_systemd_resolved_active; then
+		resolvectl revert "$interface"
+	elif is_legacy_resolvconf; then
+		/sbin/resolvconf -d "${interface}.udhcpc"
+	fi
+}
+
 case $1 in
     bound|renew)
 	[ -n "$broadcast" ] && BROADCAST="broadcast $broadcast"
@@ -34,17 +72,11 @@ case $1 in
 "
 	done
 
-	if [ -x /sbin/resolvconf ]; then
-	    echo -n "$R" | resolvconf -a "${interface}.udhcpc"
-	else
-	    echo -n "$R" > "$RESOLV_CONF"
-	fi
+	update_dns
 	;;
 
     deconfig)
-	if [ -x /sbin/resolvconf ]; then
-	    resolvconf -d "${interface}.udhcpc"
-	fi
+	clear_dns
 	/sbin/ifconfig $interface 0.0.0.0
 	;;
 

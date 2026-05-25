@@ -31,6 +31,72 @@ static int ql_system(const char *shell_cmd) {
     return system(shell_cmd);
 }
 
+static int shell_quote_arg(const char *arg, char *out, size_t out_size)
+{
+    size_t used = 0;
+
+#define append_char(__ch) do { \
+        if (used + 1 >= out_size) \
+            return -1; \
+        out[used++] = (__ch); \
+        out[used] = '\0'; \
+    } while (0)
+
+    append_char('\'');
+    while (*arg) {
+        if (*arg == '\'') {
+            const char quote_escape[] = "'\\''";
+            size_t escape_index;
+
+            for (escape_index = 0; escape_index < sizeof(quote_escape) - 1; escape_index++)
+                append_char(quote_escape[escape_index]);
+        }
+        else {
+            append_char(*arg);
+        }
+        arg++;
+    }
+    append_char('\'');
+
+#undef append_char
+    return 0;
+}
+
+static void cleanup_udhcpc_script(PROFILE_T *profile, const char *ifname)
+{
+    char quoted_ifname[128];
+    char shell_cmd[1024];
+
+    if (!ifname || !ifname[0])
+        return;
+
+    if (profile->udhcpc_script && profile->udhcpc_script[0]) {
+        char quoted_script[512];
+
+        if (shell_quote_arg(ifname, quoted_ifname, sizeof(quoted_ifname))
+            || shell_quote_arg(profile->udhcpc_script, quoted_script, sizeof(quoted_script))) {
+            dbg_time("udhcpc cleanup interface or script path is too long");
+            return;
+        }
+
+        snprintf(shell_cmd, sizeof(shell_cmd),
+            "env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin interface=%s %s deconfig",
+            quoted_ifname, quoted_script);
+        ql_system(shell_cmd);
+        return;
+    }
+
+    if (!access("/usr/bin/resolvectl", X_OK) || !access("/bin/resolvectl", X_OK)) {
+        if (shell_quote_arg(ifname, quoted_ifname, sizeof(quoted_ifname))) {
+            dbg_time("resolvectl cleanup interface name is too long");
+            return;
+        }
+
+        snprintf(shell_cmd, sizeof(shell_cmd), "resolvectl revert %s", quoted_ifname);
+        ql_system(shell_cmd);
+    }
+}
+
 static void ifc_init_ifr(const char *name, struct ifreq *ifr)
 {
     memset(ifr, 0, sizeof(struct ifreq));
@@ -532,7 +598,7 @@ void udhcpc_start(PROFILE_T *profile) {
     else
 /* Do DHCP using busybox tools */
     {
-        char udhcpc_cmd[128];
+        char udhcpc_cmd[1024];
         pthread_attr_t udhcpc_thread_attr;
         pthread_t udhcpc_thread_id;
 
@@ -543,17 +609,41 @@ void udhcpc_start(PROFILE_T *profile) {
             snprintf(udhcpc_cmd, sizeof(udhcpc_cmd), "dhclient -4 -d --no-pid %s", ifname);
             dhclient_alive++;
 #else
-            if (access("/usr/share/udhcpc/default.script", X_OK)
-                && access("/etc//udhcpc/default.script", X_OK)) {
-                dbg_time("No default.script found, it should be in '/usr/share/udhcpc/' or '/etc//udhcpc' depend on your udhcpc version!");
+            if (profile->udhcpc_script && profile->udhcpc_script[0]) {
+                char quoted_ifname[128];
+                char quoted_script[512];
+
+                if (access(profile->udhcpc_script, X_OK))
+                    dbg_time("Configured udhcpc script '%s' is not executable or not found", profile->udhcpc_script);
+
+                if (shell_quote_arg(ifname, quoted_ifname, sizeof(quoted_ifname))
+                    || shell_quote_arg(profile->udhcpc_script, quoted_script, sizeof(quoted_script))) {
+                    dbg_time("udhcpc interface or script path is too long");
+                    goto set_ipv6;
+                }
+
+                snprintf(udhcpc_cmd, sizeof(udhcpc_cmd), "busybox udhcpc -f -n -q -t 5 -i %s -s %s", quoted_ifname, quoted_script);
             }
+            else {
+                char quoted_ifname[128];
+
+                if (access("/usr/share/udhcpc/default.script", X_OK)
+                && access("/etc//udhcpc/default.script", X_OK)) {
+                    dbg_time("No default.script found, it should be in '/usr/share/udhcpc/' or '/etc//udhcpc' depend on your udhcpc version!");
+                }
+
+                if (shell_quote_arg(ifname, quoted_ifname, sizeof(quoted_ifname))) {
+                    dbg_time("udhcpc interface name is too long");
+                    goto set_ipv6;
+                }
 
             //-f,--foreground    Run in foreground
             //-b,--background    Background if lease is not obtained
             //-n,--now        Exit if lease is not obtained
             //-q,--quit        Exit after obtaining lease
             //-t,--retries N        Send up to N discover packets (default 3)
-            snprintf(udhcpc_cmd, sizeof(udhcpc_cmd), "busybox udhcpc -f -n -q -t 5 -i %s", ifname);
+                snprintf(udhcpc_cmd, sizeof(udhcpc_cmd), "busybox udhcpc -f -n -q -t 5 -i %s", quoted_ifname);
+            }
 #endif
 
 #if 1 //for OpenWrt
@@ -724,6 +814,8 @@ void udhcpc_stop(PROFILE_T *profile) {
         if (system("killall dibbler-client")) {};
         dibbler_client_alive = 0;
     }
+
+    cleanup_udhcpc_script(profile, ifname);
 
     profile->udhcpc_ip = 0;
 //it seems when call netif_carrier_on(), and netcard 's IP is "0.0.0.0", will cause netif_queue_stopped()

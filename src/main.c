@@ -384,6 +384,7 @@ static int usage(const char *progname) {
     dbg_time("-b                                     Enable network interface bridge function (default 0)");
     dbg_time("-v                                     Verbose log mode, for debug purpose.");
     dbg_time("-d                                     Obtain the IP address and dns through qmi");
+    dbg_time("-S udhcpc_script                       Specify udhcpc script path, for example scripts/default.script_ip");
     dbg_time("-a                                     1:Device attempts to bring up a call with the APN name,if -a 1 need add -s apn_name ;2:Device attempts to bring up a call with the APN type,if -a 2 need add -y apn_type");
     dbg_time("-y                                     Set APN type 0:APN type unspecified 1:internet traffic. 2:IMS");
     dbg_time("[Examples]");
@@ -1130,6 +1131,12 @@ static int parse_user_input(int argc, char **argv, PROFILE_T *profile) {
 
             case 'd':
                 profile->no_dhcp = 1;
+            break;
+
+            case 'S':
+                if (has_more_argv()) {
+                    profile->udhcpc_script = argv[opt++];
+                }
             break;
 
             case 'u':

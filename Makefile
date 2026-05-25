@@ -26,11 +26,14 @@ CFLAGS += -Wall -Wextra -Werror -O1 #-s
 LDFLAGS += -lpthread -ldl -lrt
 OUT_DIR := ./out
 
-release: qmi-proxy mbim-proxy atc-proxy | $(OUT_DIR) #qrtr-proxy
+release: qmi-proxy mbim-proxy atc-proxy cm-test | $(OUT_DIR) #qrtr-proxy
 	$(CC) ${CFLAGS} ${QL_CM_SRC} ${QL_CM_DHCP} -o $(OUT_DIR)/quectel-CM ${LDFLAGS}
 
 debug: | $(OUT_DIR)
 	$(CC) ${CFLAGS} -g -DCM_DEBUG ${QL_CM_SRC} ${QL_CM_DHCP} -o $(OUT_DIR)/quectel-CM -lpthread -ldl -lrt
+
+cm-test: | $(OUT_DIR)
+	$(CC) ${CFLAGS} $(SRC_DIR)/cm_test_main.c -o $(OUT_DIR)/quectel-cm-test ${LDFLAGS}
 
 qmi-proxy: | $(OUT_DIR)
 	$(CC) ${CFLAGS} $(SRC_DIR)/quectel-qmi-proxy.c -o $(OUT_DIR)/quectel-qmi-proxy ${LDFLAGS} 

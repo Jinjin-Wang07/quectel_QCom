@@ -20,6 +20,9 @@ add_executable(quectel-CM ${QL_CM_SRC} ${QRTR_SRC})
 target_link_libraries(quectel-CM PUBLIC pthread) 
 install (TARGETS quectel-CM DESTINATION bin)
 
+add_executable(quectel-cm-test ${SRC_DIR}/cm_test_main.c)
+install (TARGETS quectel-cm-test DESTINATION bin)
+
 add_executable(quectel-qmi-proxy ${SRC_DIR}/quectel-qmi-proxy.c)
 target_link_libraries(quectel-qmi-proxy PUBLIC pthread) 
 install (TARGETS quectel-qmi-proxy DESTINATION bin)

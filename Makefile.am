@@ -13,6 +13,9 @@ endif
 
 quectel_CM_SOURCES = ${QL_CM_SRC} ${QL_CM_DHCP} 
 
+bin_PROGRAMS += quectel-cm-test
+quectel_cm_test_SOURCES = src/cm_test_main.c
+
 bin_PROGRAMS += quectel-qmi-proxy
 quectel_qmi_proxy_SOURCES = src/quectel-qmi-proxy.c
 
