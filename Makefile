@@ -8,16 +8,17 @@ ifeq ($(CC),cc)
 CC:=$(CROSS-COMPILE)gcc
 endif
 LD:=$(CROSS-COMPILE)ld
+SRC_DIR := src
 
-QL_CM_SRC=QmiWwanCM.c GobiNetCM.c main.c QCQMUX.c QMIThread.c util.c qmap_bridge_mode.c mbim-cm.c device.c
-QL_CM_SRC+=atc.c atchannel.c at_tok.c
-#QL_CM_SRC+=qrtr.c rmnetctl.c
+QL_CM_SRC=$(SRC_DIR)/QmiWwanCM.c $(SRC_DIR)/GobiNetCM.c $(SRC_DIR)/main.c $(SRC_DIR)/QCQMUX.c $(SRC_DIR)/QMIThread.c $(SRC_DIR)/util.c $(SRC_DIR)/qmap_bridge_mode.c $(SRC_DIR)/mbim-cm.c $(SRC_DIR)/device.c
+QL_CM_SRC+=$(SRC_DIR)/atc.c $(SRC_DIR)/atchannel.c $(SRC_DIR)/at_tok.c
+#QL_CM_SRC+=$(SRC_DIR)/qrtr.c $(SRC_DIR)/rmnetctl.c
 ifeq (1,1)
-QL_CM_DHCP=udhcpc.c
+QL_CM_DHCP=$(SRC_DIR)/udhcpc.c
 else
 LIBMNL=libmnl/ifutils.c libmnl/attr.c libmnl/callback.c libmnl/nlmsg.c libmnl/socket.c
 DHCP=libmnl/dhcp/dhcpclient.c libmnl/dhcp/dhcpmsg.c libmnl/dhcp/packet.c
-QL_CM_DHCP=udhcpc_netlink.c
+QL_CM_DHCP=$(SRC_DIR)/udhcpc_netlink.c
 QL_CM_DHCP+=${LIBMNL}
 endif
 
@@ -32,16 +33,16 @@ debug: | $(OUT_DIR)
 	$(CC) ${CFLAGS} -g -DCM_DEBUG ${QL_CM_SRC} ${QL_CM_DHCP} -o $(OUT_DIR)/quectel-CM -lpthread -ldl -lrt
 
 qmi-proxy: | $(OUT_DIR)
-	$(CC) ${CFLAGS} quectel-qmi-proxy.c -o $(OUT_DIR)/quectel-qmi-proxy ${LDFLAGS} 
+	$(CC) ${CFLAGS} $(SRC_DIR)/quectel-qmi-proxy.c -o $(OUT_DIR)/quectel-qmi-proxy ${LDFLAGS} 
 
 mbim-proxy: | $(OUT_DIR)
-	$(CC) ${CFLAGS} quectel-mbim-proxy.c -o $(OUT_DIR)/quectel-mbim-proxy ${LDFLAGS} 
+	$(CC) ${CFLAGS} $(SRC_DIR)/quectel-mbim-proxy.c -o $(OUT_DIR)/quectel-mbim-proxy ${LDFLAGS} 
 
 qrtr-proxy: | $(OUT_DIR)
-	$(CC) ${CFLAGS} quectel-qrtr-proxy.c -o $(OUT_DIR)/quectel-qrtr-proxy ${LDFLAGS} 
+	$(CC) ${CFLAGS} $(SRC_DIR)/quectel-qrtr-proxy.c -o $(OUT_DIR)/quectel-qrtr-proxy ${LDFLAGS} 
 
 atc-proxy: | $(OUT_DIR)
-	$(CC) ${CFLAGS} quectel-atc-proxy.c atchannel.c at_tok.c util.c -o $(OUT_DIR)/quectel-atc-proxy ${LDFLAGS} 
+	$(CC) ${CFLAGS} $(SRC_DIR)/quectel-atc-proxy.c $(SRC_DIR)/atchannel.c $(SRC_DIR)/at_tok.c $(SRC_DIR)/util.c -o $(OUT_DIR)/quectel-atc-proxy ${LDFLAGS} 
 
 $(OUT_DIR):
 	mkdir -p $(OUT_DIR)

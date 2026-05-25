@@ -395,10 +395,12 @@ static int usage(const char *progname) {
 
 static int qmi_main(PROFILE_T *profile)
 {
+    int ret = 0;
+    int sim_absent = 0;
     int triger_event = 0;
     int signo;
 #ifdef CONFIG_SIM
-    SIM_Status SIMStatus = SIM_ABSENT;
+    SIM_Status SIMStatus = SIM_NOT_READY;
 #endif
     UCHAR PSAttachedState = 0;
     UCHAR  IPv4ConnectionStatus = QWDS_PKT_DATA_UNKNOW;
@@ -495,8 +497,22 @@ static int qmi_main(PROFILE_T *profile)
             qmierr = request_ops->requestGetSIMStatus(&SIMStatus);
         }
 
+        if (qmierr) {
+            dbg_time("requestGetSIMStatus failed: %d", qmierr);
+            ret = -1;
+            main_send_event_to_qmidevice(RIL_REQUEST_QUIT);
+            goto __main_quit;
+        }
+
         if ((SIMStatus == SIM_PIN) && profile->pincode && request_ops->requestEnterSimPin) {
             request_ops->requestEnterSimPin(profile->pincode);
+        }
+
+        if (SIMStatus == SIM_ABSENT) {
+            sim_absent = 1;
+            ret = -1;
+            main_send_event_to_qmidevice(RIL_REQUEST_QUIT);
+            goto __main_quit;
         }
     }
 
@@ -891,8 +907,10 @@ __main_quit:
     close(qcm_status_indication_fd[1]);
 #endif
     dbg_time("%s exit", __func__);
+    if (sim_absent)
+        dbg_time("****** ERROR: SIM is absent, Please Insert SIM card, and run ./scripts/restart-modem.sh ******");
 
-    return 0;
+    return ret;
 }
 
 static int quectel_CM(PROFILE_T *profile)
