@@ -33,6 +33,10 @@
 #define MAX_RESPONSE_LEN 8192
 #define MAX_ARGS 48
 
+static int s_critical_only;
+static char s_last_if_state[MAX_VALUE_LEN];
+static char s_last_dns_servers[MAX_COMMAND_LEN];
+
 typedef struct {
     char config_file[MAX_VALUE_LEN];
     char cm_path[MAX_VALUE_LEN];
@@ -69,10 +73,72 @@ typedef struct {
     int ping_count;
     int ping_timeout_sec;
     int at_timeout_sec;
+    int critical_log_only;
 } CM_TEST_CONFIG;
 
 static FILE *s_log_fp;
 static volatile sig_atomic_t s_stop_requested;
+
+static int contains_word_case_insensitive(const char *text, const char *word)
+{
+    size_t text_len;
+    size_t word_len;
+    size_t i;
+    size_t j;
+
+    if (!text || !word)
+        return 0;
+
+    text_len = strlen(text);
+    word_len = strlen(word);
+    if (!word_len || word_len > text_len)
+        return 0;
+
+    for (i = 0; i + word_len <= text_len; i++) {
+        for (j = 0; j < word_len; j++) {
+            if (tolower((unsigned char)text[i + j]) != tolower((unsigned char)word[j]))
+                break;
+        }
+        if (j == word_len)
+            return 1;
+    }
+
+    return 0;
+}
+
+static int should_keep_critical_log(const char *msg)
+{
+    static const char *critical_keywords[] = {
+        "requestBaseBandVersion",
+        "requestGetSIMStatus",
+        "requestGetProfile",
+        "requestRegistrationState",
+        "requestQueryDataCall",
+        "requestSetupDataCall",
+        "QConnectManager_Linux",
+        "Find /sys/bus/usb/devices/",
+        "Auto find qmichannel",
+        "Auto find usbnet_adapter",
+        "ip link set dev",
+        "ip addr flush dev",
+        "env -i PATH=",
+        "busybox udhcpc",
+        "failed",
+        "error",
+        "timeout"
+    };
+    size_t i;
+
+    if (!s_critical_only)
+        return 1;
+
+    for (i = 0; i < ARRAY_SIZE(critical_keywords); i++) {
+        if (contains_word_case_insensitive(msg, critical_keywords[i]))
+            return 1;
+    }
+
+    return 0;
+}
 
 static const char *now_string(void)
 {
@@ -100,19 +166,23 @@ static const char *now_string(void)
 static void test_log(const char *fmt, ...)
 {
     va_list args;
+    char message[MAX_RESPONSE_LEN];
+
+    va_start(args, fmt);
+    vsnprintf(message, sizeof(message), fmt, args);
+    va_end(args);
+
+    if (!should_keep_critical_log(message))
+        return;
 
     fprintf(stdout, "[%s] ", now_string());
-    va_start(args, fmt);
-    vfprintf(stdout, fmt, args);
-    va_end(args);
+    fprintf(stdout, "%s", message);
     fprintf(stdout, "\n");
     fflush(stdout);
 
     if (s_log_fp) {
         fprintf(s_log_fp, "[%s] ", now_string());
-        va_start(args, fmt);
-        vfprintf(s_log_fp, fmt, args);
-        va_end(args);
+        fprintf(s_log_fp, "%s", message);
         fprintf(s_log_fp, "\n");
         fflush(s_log_fp);
     }
@@ -353,6 +423,7 @@ static void set_default_config(CM_TEST_CONFIG *config)
     config->ping_count = 1;
     config->ping_timeout_sec = 5;
     config->at_timeout_sec = 5;
+    config->critical_log_only = 0;
 }
 
 static int apply_config_key(CM_TEST_CONFIG *config, const char *key, const char *value)
@@ -425,6 +496,9 @@ static int apply_config_key(CM_TEST_CONFIG *config, const char *key, const char 
         config->ping_timeout_sec = parse_positive_int(value, config->ping_timeout_sec);
     else if (!strcasecmp(key, "at_timeout_sec"))
         config->at_timeout_sec = parse_positive_int(value, config->at_timeout_sec);
+    else if (!strcasecmp(key, "critical_log_only") || !strcasecmp(key, "less_log") ||
+        !strcasecmp(key, "quiet"))
+        config->critical_log_only = parse_bool(value, config->critical_log_only);
     else {
         test_log("unknown config key '%s'", key);
         return -1;
@@ -865,6 +939,7 @@ static void log_interface_status(const CM_TEST_CONFIG *config)
     char command[MAX_COMMAND_LEN];
     FILE *command_fp;
     char line[512];
+    char operstate[MAX_VALUE_LEN] = {0};
     int command_status;
 
     if (!config->interface[0]) {
@@ -873,6 +948,25 @@ static void log_interface_status(const CM_TEST_CONFIG *config)
     }
 
     snprintf(path, sizeof(path), "/sys/class/net/%s/operstate", config->interface);
+    {
+        FILE *state_fp = fopen(path, "r");
+        if (state_fp) {
+            if (fgets(operstate, sizeof(operstate), state_fp)) {
+                char *trimmed = trim(operstate);
+                if (trimmed[0]) {
+                    if (!s_last_if_state[0] || strcmp(s_last_if_state, trimmed)) {
+                        test_log("interface state: %s %s", config->interface, trimmed);
+                        copy_value(s_last_if_state, sizeof(s_last_if_state), trimmed);
+                    }
+                }
+            }
+            fclose(state_fp);
+        }
+    }
+
+    if (s_critical_only)
+        return;
+
     log_file_first_line(path, "interface operstate");
 
     snprintf(command, sizeof(command), "ip -brief address show dev '%s' 2>&1", config->interface);
@@ -888,6 +982,42 @@ static void log_interface_status(const CM_TEST_CONFIG *config)
     }
     command_status = pclose(command_fp);
     test_log("interface address command status=%d", command_status);
+}
+
+static void log_dns_servers(void)
+{
+    FILE *resolv_fp;
+    char line[512];
+    char dns_servers[MAX_COMMAND_LEN] = {0};
+    size_t used = 0;
+
+    resolv_fp = fopen("/etc/resolv.conf", "r");
+    if (!resolv_fp)
+        return;
+
+    while (fgets(line, sizeof(line), resolv_fp)) {
+        char *entry = trim(line);
+        if (!strncmp(entry, "nameserver", strlen("nameserver"))) {
+            char *value = entry + strlen("nameserver");
+
+            value = trim(value);
+            if (value[0]) {
+                int appended = snprintf(dns_servers + used, sizeof(dns_servers) - used,
+                    "%s%s", used ? "," : "", value);
+                if (appended < 0 || (size_t)appended >= sizeof(dns_servers) - used) {
+                    used = sizeof(dns_servers) - 1;
+                    break;
+                }
+                used += (size_t)appended;
+            }
+        }
+    }
+
+    fclose(resolv_fp);
+    if (dns_servers[0] && strcmp(dns_servers, s_last_dns_servers)) {
+        copy_value(s_last_dns_servers, sizeof(s_last_dns_servers), dns_servers);
+        test_log("dns servers: %s", s_last_dns_servers);
+    }
 }
 
 static int run_ping_check(const CM_TEST_CONFIG *config)
@@ -922,12 +1052,16 @@ static int run_ping_check(const CM_TEST_CONFIG *config)
 
 static void log_status_snapshot(const CM_TEST_CONFIG *config, const char *phase)
 {
+    if (s_critical_only)
+        return;
+
     test_log("status snapshot: %s", phase);
     if (config->at_device[0])
         run_at_command_list(config->at_device, "modem-info", config->info_commands, config->at_timeout_sec);
     else
         test_log("modem AT info skipped: at_device is not configured");
     log_interface_status(config);
+    log_dns_servers();
     run_ping_check(config);
 }
 
@@ -990,7 +1124,7 @@ static int run_cycle(const CM_TEST_CONFIG *config, int cycle_no)
 
 static void usage(const char *progname)
 {
-    fprintf(stderr, "Usage: %s -c config_file [-f log_file] [-v]\n", progname);
+    fprintf(stderr, "Usage: %s -c config_file [-f log_file] [-v] [-q]\n", progname);
 }
 
 int main(int argc, char **argv)
@@ -1004,7 +1138,7 @@ int main(int argc, char **argv)
 
     set_default_config(&config);
 
-    while ((option = getopt(argc, argv, "c:f:vh")) != -1) {
+    while ((option = getopt(argc, argv, "c:f:vqh")) != -1) {
         switch (option) {
         case 'c':
             copy_value(config.config_file, sizeof(config.config_file), optarg);
@@ -1014,6 +1148,9 @@ int main(int argc, char **argv)
             break;
         case 'v':
             cli_verbose = 1;
+            break;
+        case 'q':
+            config.critical_log_only = 1;
             break;
         case 'h':
         default:
@@ -1034,6 +1171,7 @@ int main(int argc, char **argv)
         copy_value(config.log_file, sizeof(config.log_file), cli_log_file);
     if (cli_verbose)
         config.verbose = 1;
+    s_critical_only = config.critical_log_only;
     if (resolve_config_paths(&config)) {
         fprintf(stderr, "failed to resolve paths relative to config %s\n", config.config_file);
         return 1;

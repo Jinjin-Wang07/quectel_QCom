@@ -168,19 +168,6 @@ static UCHAR QmiWwanGetClientID(UCHAR QMIType) {
         UCHAR ClientId = pResponse->CTLMsg.GetClientIdRsp.ClientId;
 
         if (!QMUXResult && !QMUXError && (QMIType == pResponse->CTLMsg.GetClientIdRsp.QMIType)) {
-            switch (QMIType) {
-                case QMUX_TYPE_WDS: dbg_time("Get clientWDS = %d", ClientId); break;
-                case QMUX_TYPE_DMS: dbg_time("Get clientDMS = %d", ClientId); break;
-                case QMUX_TYPE_NAS: dbg_time("Get clientNAS = %d", ClientId); break;
-                case QMUX_TYPE_QOS: dbg_time("Get clientQOS = %d", ClientId); break;
-                case QMUX_TYPE_WMS: dbg_time("Get clientWMS = %d", ClientId); break;
-                case QMUX_TYPE_PDS: dbg_time("Get clientPDS = %d", ClientId); break;
-                case QMUX_TYPE_UIM: dbg_time("Get clientUIM = %d", ClientId); break;
-                case QMUX_TYPE_COEX: dbg_time("Get clientCOEX = %d", ClientId); break;
-                case QMUX_TYPE_WDS_ADMIN: dbg_time("Get clientWDA = %d", ClientId);
-                break;
-                default: break;
-            }
             return ClientId;
         }
     }
@@ -342,8 +329,6 @@ static void * QmiWwanThread(void *pData) {
         pthread_exit(NULL);
         return NULL;
     }
-
-    dbg_time("cdc_wdm_fd = %d", cdc_wdm_fd);
 
     qmidevice_send_event_to_main(RIL_INDICATE_DEVICE_CONNECTED);
     while (1) {

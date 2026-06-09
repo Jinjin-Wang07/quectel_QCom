@@ -69,20 +69,6 @@ static int GobiNetGetClientID(const char *qcqmi, UCHAR QMIType) {
         ClientId = 0;
     }
 
-    switch (QMIType) {
-        case QMUX_TYPE_WDS: dbg_time("Get clientWDS = %d", ClientId); break;
-        case QMUX_TYPE_DMS: dbg_time("Get clientDMS = %d", ClientId); break;
-        case QMUX_TYPE_NAS: dbg_time("Get clientNAS = %d", ClientId); break;
-        case QMUX_TYPE_QOS: dbg_time("Get clientQOS = %d", ClientId); break;
-        case QMUX_TYPE_WMS: dbg_time("Get clientWMS = %d", ClientId); break;
-        case QMUX_TYPE_PDS: dbg_time("Get clientPDS = %d", ClientId); break;
-        case QMUX_TYPE_UIM: dbg_time("Get clientUIM = %d", ClientId); break;
-        case QMUX_TYPE_COEX: dbg_time("Get clientCOEX = %d", ClientId); break;
-        case QMUX_TYPE_WDS_ADMIN: dbg_time("Get clientWDA = %d", ClientId);
-        break;
-        default: break;
-    }
-
     return ClientId;
 }
 
